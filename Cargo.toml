@@ -1,0 +1,35 @@
+# Procura contracts — Cargo workspace.
+#
+# This root manifest wires up the Soroban contract workspace described in the
+# repository README and docs/. It intentionally contains no business logic:
+# the escrow / milestone state machine and the SEP-41 payment path land in
+# later changes. See docs/README.md for the contract specification.
+
+[workspace]
+resolver = "2"
+members = [
+    "contracts/escrow",
+    "packages/mock-token",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/ProcuraLabs/procura-contracts"
+authors = ["Procura Labs"]
+
+[workspace.dependencies]
+soroban-sdk = "=27.0.5"
+
+# Optimized release profile for on-chain WASM, per the Soroban toolchain guidance.
+# `stellar contract build` compiles the contracts in this profile.
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true

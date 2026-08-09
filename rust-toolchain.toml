@@ -1,0 +1,6 @@
+# Pin the toolchain to match CI (.github/workflows/ci.yml): stable Rust with the
+# wasm32v1-none target and the rustfmt/clippy components the Makefile relies on.
+[toolchain]
+channel = "stable"
+targets = ["wasm32v1-none"]
+components = ["rustfmt", "clippy"]
