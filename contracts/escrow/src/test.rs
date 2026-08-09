@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, Env, IntoVal, TryFromVal, Val};
 
 use crate::{
@@ -197,5 +197,111 @@ fn records_round_trip_through_storage() {
         assert!(persistent.has(&DataKey::Escrow(1)));
         assert!(!persistent.has(&DataKey::Procurement(2)));
         assert!(!persistent.has(&DataKey::Milestone(1, 1)));
+    });
+}
+
+/// Happy path: an authorized organization creates a procurement. The contract
+/// assigns id 1, stamps the ledger time, and persists an `Open` request with no
+/// vendor selected.
+#[test]
+fn create_procurement_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_700_000_000);
+
+    let contract_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let organization = Address::generate(&env);
+
+    let id = client.create_procurement(&organization, &10_000);
+    assert_eq!(id, 1);
+
+    let stored = env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .get::<_, ProcurementRequest>(&DataKey::Procurement(1))
+            .unwrap()
+    });
+    assert_eq!(
+        stored,
+        ProcurementRequest {
+            id: 1,
+            organization,
+            status: ProcurementStatus::Open,
+            budget: 10_000,
+            selected_vendor: None,
+            created_at: 1_700_000_000,
+        }
+    );
+}
+
+/// The organization must authorize the call; without its signature the
+/// `require_auth` gate rejects creation.
+#[test]
+fn create_procurement_requires_organization_auth() {
+    let env = Env::default();
+    // Note: no `mock_all_auths()` — the required authorization is absent.
+    let contract_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let organization = Address::generate(&env);
+
+    let result = client.try_create_procurement(&organization, &10_000);
+    assert!(result.is_err());
+}
+
+/// A non-positive budget is rejected as invalid input, and nothing is persisted.
+#[test]
+fn create_procurement_rejects_non_positive_budget() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let organization = Address::generate(&env);
+
+    for budget in [0i128, -1] {
+        let result = client.try_create_procurement(&organization, &budget);
+        assert_eq!(result, Err(Ok(Error::InvalidInput)));
+    }
+
+    // No id was consumed and no record written.
+    env.as_contract(&contract_id, || {
+        assert!(!env.storage().persistent().has(&DataKey::Procurement(1)));
+        assert!(env
+            .storage()
+            .instance()
+            .get::<_, u64>(&DataKey::LastProcurementId)
+            .is_none());
+    });
+}
+
+/// Repeated creation yields distinct, monotonically increasing ids that address
+/// independent storage slots — no id collision or record overwrite.
+#[test]
+fn create_procurement_generates_unique_ids() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let org_a = Address::generate(&env);
+    let org_b = Address::generate(&env);
+
+    let first = client.create_procurement(&org_a, &10_000);
+    let second = client.create_procurement(&org_b, &25_000);
+    assert_eq!(first, 1);
+    assert_eq!(second, 2);
+
+    env.as_contract(&contract_id, || {
+        let persistent = env.storage().persistent();
+        let a = persistent
+            .get::<_, ProcurementRequest>(&DataKey::Procurement(1))
+            .unwrap();
+        let b = persistent
+            .get::<_, ProcurementRequest>(&DataKey::Procurement(2))
+            .unwrap();
+        assert_eq!(a.organization, org_a);
+        assert_eq!(b.organization, org_b);
+        assert_eq!(b.budget, 25_000);
     });
 }
