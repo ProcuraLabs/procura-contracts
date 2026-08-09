@@ -123,3 +123,29 @@ pub struct Milestone {
     /// Amount released from escrow when this milestone is paid.
     pub amount: i128,
 }
+
+/// Singleton contract configuration, established once at initialization.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Config {
+    /// Administrator authorized for privileged operations.
+    pub admin: Address,
+    /// SEP-41 token held in escrow and used for milestone payments.
+    pub token: Address,
+}
+
+/// Escrow accounting for a single procurement's funds.
+///
+/// The remaining balance is `funded - released` and is intentionally **not**
+/// stored — it is always derivable, keeping the record minimal. The operations
+/// that mutate these totals land in later changes.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Escrow {
+    /// Procurement whose funds these are.
+    pub procurement_id: u64,
+    /// Total amount deposited into escrow.
+    pub funded: i128,
+    /// Total amount already released to the vendor.
+    pub released: i128,
+}

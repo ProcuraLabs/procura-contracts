@@ -14,11 +14,14 @@
 use soroban_sdk::{contract, contractimpl};
 
 mod error;
+mod storage;
 mod types;
 
 pub use error::Error;
+pub use storage::DataKey;
 pub use types::{
-    Milestone, MilestoneStatus, ProcurementRequest, ProcurementStatus, Proposal, ProposalStatus,
+    Config, Escrow, Milestone, MilestoneStatus, ProcurementRequest, ProcurementStatus, Proposal,
+    ProposalStatus,
 };
 
 #[contract]

@@ -4,8 +4,8 @@ use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, IntoVal, TryFromVal, Val};
 
 use crate::{
-    Error, EscrowContract, EscrowContractClient, Milestone, MilestoneStatus, ProcurementRequest,
-    ProcurementStatus, Proposal, ProposalStatus,
+    Config, DataKey, Error, Escrow, EscrowContract, EscrowContractClient, Milestone,
+    MilestoneStatus, ProcurementRequest, ProcurementStatus, Proposal, ProposalStatus,
 };
 
 /// Smoke test: the scaffold contract registers, invokes, and returns its version.
@@ -104,4 +104,98 @@ fn status_discriminants_are_stable() {
     assert_eq!(MilestoneStatus::Approved as u32, 2);
     assert_eq!(MilestoneStatus::Paid as u32, 3);
     assert_eq!(MilestoneStatus::Rejected as u32, 4);
+}
+
+/// Store each record under its `DataKey`, then read it back, exercising the real
+/// Soroban storage tiers. Also pins the anti-collision property: keys that share a
+/// numeric id but differ in kind — `Procurement(1)` vs `Proposal(1)` vs
+/// `Escrow(1)` — address independent slots.
+#[test]
+fn records_round_trip_through_storage() {
+    let env = Env::default();
+    let contract_id = env.register(EscrowContract, ());
+
+    let admin = Address::generate(&env);
+    let token = Address::generate(&env);
+    let organization = Address::generate(&env);
+    let vendor = Address::generate(&env);
+
+    let config = Config {
+        admin,
+        token: token.clone(),
+    };
+    let request = ProcurementRequest {
+        id: 1,
+        organization,
+        status: ProcurementStatus::Open,
+        budget: 10_000,
+        selected_vendor: None,
+        created_at: 100,
+    };
+    let proposal = Proposal {
+        id: 1,
+        procurement_id: 1,
+        vendor,
+        status: ProposalStatus::Submitted,
+        amount: 9_500,
+        submitted_at: 101,
+    };
+    let milestone = Milestone {
+        id: 0,
+        procurement_id: 1,
+        status: MilestoneStatus::Pending,
+        amount: 2_500,
+    };
+    let escrow = Escrow {
+        procurement_id: 1,
+        funded: 9_500,
+        released: 0,
+    };
+
+    env.as_contract(&contract_id, || {
+        let instance = env.storage().instance();
+        let persistent = env.storage().persistent();
+
+        instance.set(&DataKey::Config, &config);
+        instance.set(&DataKey::LastProcurementId, &1u64);
+        persistent.set(&DataKey::Procurement(1), &request);
+        persistent.set(&DataKey::Proposal(1), &proposal);
+        persistent.set(&DataKey::Milestone(1, 0), &milestone);
+        persistent.set(&DataKey::Escrow(1), &escrow);
+
+        assert_eq!(instance.get::<_, Config>(&DataKey::Config).unwrap(), config);
+        assert_eq!(
+            instance.get::<_, u64>(&DataKey::LastProcurementId).unwrap(),
+            1
+        );
+        assert_eq!(
+            persistent
+                .get::<_, ProcurementRequest>(&DataKey::Procurement(1))
+                .unwrap(),
+            request
+        );
+        assert_eq!(
+            persistent
+                .get::<_, Proposal>(&DataKey::Proposal(1))
+                .unwrap(),
+            proposal
+        );
+        assert_eq!(
+            persistent
+                .get::<_, Milestone>(&DataKey::Milestone(1, 0))
+                .unwrap(),
+            milestone
+        );
+        assert_eq!(
+            persistent.get::<_, Escrow>(&DataKey::Escrow(1)).unwrap(),
+            escrow
+        );
+
+        // Same id `1`, different key kinds must not alias one another.
+        assert!(persistent.has(&DataKey::Procurement(1)));
+        assert!(persistent.has(&DataKey::Proposal(1)));
+        assert!(persistent.has(&DataKey::Escrow(1)));
+        assert!(!persistent.has(&DataKey::Procurement(2)));
+        assert!(!persistent.has(&DataKey::Milestone(1, 1)));
+    });
 }
