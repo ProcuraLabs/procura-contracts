@@ -13,6 +13,10 @@
 
 use soroban_sdk::{contract, contractimpl};
 
+mod error;
+
+pub use error::Error;
+
 #[contract]
 pub struct EscrowContract;
 
