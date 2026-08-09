@@ -14,8 +14,12 @@
 use soroban_sdk::{contract, contractimpl};
 
 mod error;
+mod types;
 
 pub use error::Error;
+pub use types::{
+    Milestone, MilestoneStatus, ProcurementRequest, ProcurementStatus, Proposal, ProposalStatus,
+};
 
 #[contract]
 pub struct EscrowContract;
