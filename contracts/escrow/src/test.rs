@@ -247,6 +247,16 @@ fn create_procurement_requires_organization_auth() {
 
     let result = client.try_create_procurement(&organization, &10_000);
     assert!(result.is_err());
+
+    // A failed authorization must not consume an id or create a request.
+    env.as_contract(&contract_id, || {
+        assert!(!env.storage().persistent().has(&DataKey::Procurement(1)));
+        assert!(env
+            .storage()
+            .instance()
+            .get::<_, u64>(&DataKey::LastProcurementId)
+            .is_none());
+    });
 }
 
 /// A non-positive budget is rejected as invalid input, and nothing is persisted.
@@ -303,5 +313,51 @@ fn create_procurement_generates_unique_ids() {
         assert_eq!(a.organization, org_a);
         assert_eq!(b.organization, org_b);
         assert_eq!(b.budget, 25_000);
+    });
+}
+
+/// A pre-existing record at the next assigned id violates the storage invariant.
+/// Creation must reject it without advancing the counter or overwriting the
+/// existing request.
+#[test]
+fn create_procurement_rejects_duplicate_assigned_id() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let existing_organization = Address::generate(&env);
+    let caller = Address::generate(&env);
+    let existing = ProcurementRequest {
+        id: 1,
+        organization: existing_organization,
+        status: ProcurementStatus::Open,
+        budget: 5_000,
+        selected_vendor: None,
+        created_at: 123,
+    };
+
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Procurement(1), &existing);
+    });
+
+    let result = client.try_create_procurement(&caller, &10_000);
+    assert_eq!(result, Err(Ok(Error::DuplicateOperation)));
+
+    env.as_contract(&contract_id, || {
+        assert_eq!(
+            env.storage()
+                .persistent()
+                .get::<_, ProcurementRequest>(&DataKey::Procurement(1))
+                .unwrap(),
+            existing
+        );
+        assert!(env
+            .storage()
+            .instance()
+            .get::<_, u64>(&DataKey::LastProcurementId)
+            .is_none());
     });
 }
